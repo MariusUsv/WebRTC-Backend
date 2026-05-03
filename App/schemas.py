@@ -15,8 +15,14 @@ class TokenOut(BaseModel):
 
 class ContactAddIn(BaseModel):
     phone: str
+    contact_name: str
+
+class ContactUpdateIn(BaseModel):
+    contact_name: str
 
 class ContactOut(BaseModel):
+    id: int
     user_id: int
     phone: str
-    full_name: str
+    contact_name: str
+    is_online: bool

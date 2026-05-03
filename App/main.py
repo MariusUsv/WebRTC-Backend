@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional, Set
 
@@ -10,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db import Base, engine, get_db
 from app.models import Contact, Message, User
-from app.schemas import ContactAddIn, ContactOut, LoginIn, RegisterIn, TokenOut
+from app.schemas import ContactAddIn, ContactUpdateIn, ContactOut, LoginIn, RegisterIn, TokenOut
 from app.auth import ALGORITHM, SECRET_KEY, hash_password, verify_password
 
 app = FastAPI(title="Linko Backend")
@@ -26,6 +25,7 @@ app.add_middleware(
 Base.metadata.create_all(bind=engine)
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
+active_connections: Dict[int, WebSocket] = {}
 
 def create_access_token(user: User) -> str:
     now = datetime.now(timezone.utc)
@@ -98,40 +98,36 @@ def login(data: LoginIn, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer"}
 
 @app.post("/auth/logout")
-def logout_user(
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-):
+def logout_user(authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
     me = me_from_auth_header(db, authorization)
-    return {"ok": True, "message": "Deconectat cu succes"}
+    return {"ok": True}
 
 @app.get("/contacts", response_model=list[ContactOut])
-def list_contacts(
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-):
+def list_contacts(authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
     me = me_from_auth_header(db, authorization)
-
     rows = (
         db.query(Contact, User)
         .join(User, User.id == Contact.contact_user_id)
         .filter(Contact.owner_id == me.id)
-        .order_by(User.full_name.asc())
+        .order_by(Contact.contact_name.asc())
         .all()
     )
-    return [{"user_id": u.id, "phone": u.phone, "full_name": u.full_name} for (_c, u) in rows]
+    return [
+        {
+            "id": c.id,
+            "user_id": u.id,
+            "phone": u.phone,
+            "contact_name": c.contact_name,
+            "is_online": u.id in active_connections
+        } 
+        for c, u in rows
+    ]
 
-@app.post("/contacts/add", response_model=ContactOut)
-def add_contact(
-    data: ContactAddIn,
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-):
+@app.post("/contacts", response_model=ContactOut)
+def add_contact(data: ContactAddIn, authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
     me = me_from_auth_header(db, authorization)
     phone = str(data.phone).strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="Phone required")
-
+    
     other = db.query(User).filter(User.phone == phone).first()
     if not other:
         raise HTTPException(status_code=404, detail="User not found")
@@ -140,19 +136,40 @@ def add_contact(
 
     existing = db.query(Contact).filter(Contact.owner_id == me.id, Contact.contact_user_id == other.id).first()
     if existing:
-        return {"user_id": other.id, "phone": other.phone, "full_name": other.full_name}
+        raise HTTPException(status_code=400, detail="Contact already exists")
 
-    c = Contact(owner_id=me.id, contact_user_id=other.id)
+    c = Contact(owner_id=me.id, contact_user_id=other.id, contact_name=data.contact_name.strip())
     db.add(c)
     db.commit()
-    return {"user_id": other.id, "phone": other.phone, "full_name": other.full_name}
+    db.refresh(c)
+    return {"id": c.id, "user_id": other.id, "phone": other.phone, "contact_name": c.contact_name, "is_online": other.id in active_connections}
+
+@app.put("/contacts/{contact_id}", response_model=ContactOut)
+def update_contact(contact_id: int, data: ContactUpdateIn, authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
+    me = me_from_auth_header(db, authorization)
+    c = db.get(Contact, contact_id)
+    if not c or c.owner_id != me.id:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    
+    c.contact_name = data.contact_name.strip()
+    db.commit()
+    
+    other = db.get(User, c.contact_user_id)
+    return {"id": c.id, "user_id": other.id, "phone": other.phone, "contact_name": c.contact_name, "is_online": other.id in active_connections}
+
+@app.delete("/contacts/{contact_id}")
+def delete_contact(contact_id: int, authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
+    me = me_from_auth_header(db, authorization)
+    c = db.get(Contact, contact_id)
+    if not c or c.owner_id != me.id:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    
+    db.delete(c)
+    db.commit()
+    return {"ok": True}
 
 @app.get("/messages/{other_user_id}")
-def get_messages(
-    other_user_id: int,
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-):
+def get_messages(other_user_id: int, authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
     me = me_from_auth_header(db, authorization)
     msgs = (
         db.query(Message)
@@ -163,7 +180,6 @@ def get_messages(
         .order_by(Message.created_at.asc())
         .all()
     )
-
     return [
         {
             "message_id": m.id,
@@ -176,11 +192,7 @@ def get_messages(
     ]
 
 @app.delete("/messages/{message_id}")
-def delete_message(
-    message_id: int,
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-):
+def delete_message(message_id: int, authorization: Optional[str] = Header(default=None), db: Session = Depends(get_db)):
     me = me_from_auth_header(db, authorization)
     msg = db.get(Message, message_id)
     if not msg:
@@ -202,8 +214,6 @@ def delete_message(
 
     return {"ok": True}
 
-active_connections: Dict[int, WebSocket] = {}
-
 async def ws_send(user_id: int, payload: Dict[str, Any]) -> None:
     ws = active_connections.get(user_id)
     if not ws:
@@ -215,15 +225,8 @@ async def ws_send(user_id: int, payload: Dict[str, Any]) -> None:
             active_connections.pop(user_id, None)
 
 FORWARD_TYPES: Set[str] = {
-    "typing",
-    "presence_ping",
-    "call_invite",
-    "call_accept",
-    "call_reject",
-    "call_hangup",
-    "webrtc_offer",
-    "webrtc_answer",
-    "webrtc_ice",
+    "typing", "presence_ping", "call_invite", "call_accept", 
+    "call_reject", "call_hangup", "webrtc_offer", "webrtc_answer", "webrtc_ice"
 }
 
 @app.websocket("/ws")

@@ -17,6 +17,7 @@ class Contact(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     contact_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    contact_name: Mapped[str] = mapped_column(String(100))
 
 class Message(Base):
     __tablename__ = "messages"
