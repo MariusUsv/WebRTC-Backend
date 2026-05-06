@@ -1,28 +1,43 @@
-from sqlalchemy import String, Integer, ForeignKey, DateTime, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from datetime import datetime
-from app.db import Base
+from app.database import Base
 
 class User(Base):
     __tablename__ = "users"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    phone: Mapped[str] = mapped_column(String(32), unique=True, index=True)
-    full_name: Mapped[str] = mapped_column(String(100))
-    password_hash: Mapped[str] = mapped_column(String(255))
+
+    id = Column(Integer, primary_key=True, index=True)
+    full_name = Column(String)
+    phone = Column(String, unique=True, index=True)
+    hashed_password = Column(String)  # Parola criptată
+    is_online = Column(Boolean, default=False)
+    last_seen_at = Column(DateTime, default=datetime.utcnow)
 
 class Contact(Base):
     __tablename__ = "contacts"
-    __table_args__ = (UniqueConstraint("owner_id", "contact_user_id", name="uniq_owner_contact"),)
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    contact_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    contact_name: Mapped[str] = mapped_column(String(100))
+    id = Column(Integer, primary_key=True, index=True)
+    owner_id = Column(Integer, ForeignKey("users.id"))
+    contact_user_id = Column(Integer, ForeignKey("users.id"))
+    contact_name = Column(String)
 
 class Message(Base):
     __tablename__ = "messages"
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    sender_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    receiver_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    text: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    text = Column(String)
+    file_url = Column(String, nullable=True)
+    is_file = Column(Boolean, default=False)
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CallLog(Base):
+    __tablename__ = "call_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    caller_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    status = Column(String)  # Ex: "accepted", "rejected", "missed"
+    duration = Column(Integer, default=0)  # în secunde
+    created_at = Column(DateTime, default=datetime.utcnow)
