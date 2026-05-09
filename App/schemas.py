@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 class UserCreate(BaseModel):
@@ -21,7 +21,8 @@ class ContactOut(BaseModel):
     phone: str
     contact_name: str
     is_online: bool
-    last_seen_at: Optional[str] = None # REPARAT: Acum este opțional[cite: 11]
+    last_seen_at: Optional[str] = None  # REPARAT: Acum este opțional
+    public_key: Optional[str] = None  # cheia publică ECDH a contactului
 
 class CallLogOut(BaseModel):
     id: int
@@ -31,3 +32,15 @@ class CallLogOut(BaseModel):
     duration: int
     created_at: str
     other_party_name: str
+
+class PublicKeyIn(BaseModel):
+    public_key: str  # jwk JSON serializat
+
+class PublicKeyOut(BaseModel):
+    user_id: int
+    public_key: Optional[str] = None
+
+class ReactionOut(BaseModel):
+    message_id: int
+    user_id: int
+    emoji: str
