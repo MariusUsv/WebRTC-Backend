@@ -24,17 +24,20 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Numărul de telefon este deja înregistrat.")
 
     try:
+        # AICI E MODIFICAREA: Adăugăm [:72] pentru a trunchia parola dacă e prea lungă
+        truncated_password = user.password[:72]
+        
         # Creăm utilizatorul
         new_user = User(
             phone=user.phone,
             full_name=user.full_name,
-            hashed_password=get_password_hash(user.password)
+            hashed_password=get_password_hash(truncated_password)
         )
         db.add(new_user)
         db.commit()
         db.refresh(new_user)
         
-        # MAGIA ESTE AICI: Generăm token-ul ca să logăm userul pe loc!
+        # Generăm token-ul ca să logăm userul pe loc!
         token = create_access_token({"sub": new_user.phone, "name": new_user.full_name})
         
         print(f"DEBUG: Succes! Utilizator {user.full_name} creat și logat.")
@@ -48,7 +51,7 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
         
     except Exception as e:
         db.rollback()
-        print(f"DEBUG: Eroare internă: {str(e)}")
+        print(f"DEBUG: Eroare internă la înregistrare: {str(e)}")
         raise HTTPException(status_code=500, detail="Eroare internă la salvarea contului.")
 
 
@@ -59,7 +62,10 @@ def register(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
     user = db.query(User).filter(User.phone == user_credentials.phone).first()
     
-    if not user or not verify_password(user_credentials.password, user.hashed_password):
+    # AICI E MODIFICAREA: Adăugăm [:72] ca să comparăm exact aceleași caractere
+    truncated_password_attempt = user_credentials.password[:72]
+    
+    if not user or not verify_password(truncated_password_attempt, user.hashed_password):
         raise HTTPException(status_code=401, detail="Telefon sau parolă incorectă")
     
     token = create_access_token({"sub": user.phone, "name": user.full_name})
