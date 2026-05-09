@@ -4,6 +4,7 @@ from app.database import get_db
 from app.models import User
 from app import schemas
 from app.core.security import verify_password, create_access_token, get_password_hash
+from app.core.dependencies import get_current_user # Asigură-te că ai asta pentru rutele protejate
 
 router = APIRouter()
 
@@ -76,3 +77,22 @@ def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
 @router.post("/logout")
 def logout():
     return {"message": "Deconectare reușită"}
+
+
+# ==========================================
+# 4. RUTE PENTRU E2EE (CHEI PUBLICE)
+# ==========================================
+@router.put("/users/me/public_key")
+def update_my_public_key(payload: schemas.PublicKeyIn, me: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Clientul apelează asta după login pentru a-și urca public key-ul (JWK serializat)."""
+    me.public_key = payload.public_key
+    db.commit()
+    return {"ok": True}
+
+@router.get("/users/{user_id}/public_key", response_model=schemas.PublicKeyOut)
+def get_user_public_key(user_id: int, db: Session = Depends(get_db)):
+    """Clientul apelează asta înainte de a trimite un mesaj cuiva pentru a deriva Shared Secret-ul."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"user_id": user.id, "public_key": user.public_key}
